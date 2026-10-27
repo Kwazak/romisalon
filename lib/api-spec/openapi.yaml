@@ -3,20 +3,24 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Romi Salon booking and membership API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
+  - name: salon
+  - name: auth
+  - name: member
+  - name: bookings
+  - name: admin
+  - name: payments
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +28,721 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /salon/overview:
+    get:
+      operationId: getSalonOverview
+      tags: [salon]
+      summary: Get public salon content
+      responses:
+        "200":
+          description: Salon overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalonOverview"
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Get signed-in user
+      responses:
+        "200":
+          description: Signed-in user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionUser"
+        "401":
+          description: Not signed in
+  /auth/register:
+    post:
+      operationId: registerMember
+      tags: [auth]
+      summary: Register a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: Registered member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionUser"
+        "400":
+          description: Invalid registration
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Sign in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Signed-in user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionUser"
+        "401":
+          description: Invalid credentials
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Sign out
+      responses:
+        "204":
+          description: Signed out
+  /bookings/slots:
+    get:
+      operationId: getAvailableSlots
+      tags: [bookings]
+      summary: Get available booking times
+      parameters:
+        - name: serviceId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Available local-time slots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotsResponse"
+  /bookings:
+    post:
+      operationId: createBooking
+      tags: [bookings]
+      summary: Book a service
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingInput"
+      responses:
+        "201":
+          description: Booking awaiting payment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          description: Slot unavailable or request invalid
+        "401":
+          description: Sign-in required
+  /bookings/{bookingId}/cancel:
+    patch:
+      operationId: cancelMemberBooking
+      tags: [bookings]
+      summary: Cancel a member booking
+      parameters:
+        - name: bookingId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Cancelled booking
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+  /bookings/{bookingId}/mock-payment:
+    post:
+      operationId: completeMockPayment
+      tags: [payments]
+      summary: Complete a demo payment on the server
+      parameters:
+        - name: bookingId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Payment result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentResult"
+  /member/dashboard:
+    get:
+      operationId: getMemberDashboard
+      tags: [member]
+      summary: Get member card, benefits, bookings and transactions
+      responses:
+        "200":
+          description: Member dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberDashboard"
+        "401":
+          description: Sign-in required
+  /member/profile:
+    patch:
+      operationId: updateMemberProfile
+      tags: [member]
+      summary: Update member profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdate"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionUser"
+  /member/password:
+    patch:
+      operationId: updateMemberPassword
+      tags: [member]
+      summary: Change member password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChange"
+      responses:
+        "200":
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordChangeResult"
+        "400":
+          description: Current password is incorrect or password is too short
+  /admin/dashboard:
+    get:
+      operationId: getAdminDashboard
+      tags: [admin]
+      summary: Get salon metrics and upcoming bookings
+      responses:
+        "200":
+          description: Admin dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDashboard"
+        "403":
+          description: Admin access required
+  /admin/services:
+    get:
+      operationId: getAdminServices
+      tags: [admin]
+      summary: List services for management
+      responses:
+        "200":
+          description: Services
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SalonService" }
+    post:
+      operationId: createService
+      tags: [admin]
+      summary: Create a service
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceInput"
+      responses:
+        "201":
+          description: Created service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalonService"
+  /admin/services/{serviceId}:
+    patch:
+      operationId: updateService
+      tags: [admin]
+      summary: Update a service
+      parameters:
+        - name: serviceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceInput"
+      responses:
+        "200":
+          description: Updated service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalonService"
+    delete:
+      operationId: deleteService
+      tags: [admin]
+      summary: Deactivate a service
+      parameters:
+        - name: serviceId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deactivated service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalonService"
+  /admin/levels:
+    get:
+      operationId: getMembershipLevels
+      tags: [admin]
+      summary: List membership levels
+      responses:
+        "200":
+          description: Membership levels
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MembershipLevel" }
+    post:
+      operationId: createMembershipLevel
+      tags: [admin]
+      summary: Create a membership level
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LevelInput"
+      responses:
+        "201":
+          description: Created membership level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipLevel"
+  /admin/levels/{levelId}:
+    patch:
+      operationId: updateMembershipLevel
+      tags: [admin]
+      summary: Update a membership level
+      parameters:
+        - name: levelId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LevelInput"
+      responses:
+        "200":
+          description: Updated membership level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipLevel"
+    delete:
+      operationId: deleteMembershipLevel
+      tags: [admin]
+      summary: Delete an unused membership level
+      parameters:
+        - name: levelId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted membership level
+  /admin/members:
+    get:
+      operationId: getAdminMembers
+      tags: [admin]
+      summary: Search member accounts
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminMember" }
+  /admin/members/{userId}/level:
+    patch:
+      operationId: updateMemberLevel
+      tags: [admin]
+      summary: Manually override a member level
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberLevelInput"
+      responses:
+        "200":
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMember"
+  /admin/members/{userId}/status:
+    patch:
+      operationId: updateMemberStatus
+      tags: [admin]
+      summary: Activate or deactivate a member account
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberStatusInput"
+      responses:
+        "200":
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMember"
+  /admin/bookings:
+    get:
+      operationId: getAdminBookings
+      tags: [admin]
+      summary: List and filter bookings
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Booking" }
+  /admin/bookings/{bookingId}:
+    patch:
+      operationId: updateBookingStatus
+      tags: [admin]
+      summary: Update a booking status
+      parameters:
+        - name: bookingId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingStatusInput"
+      responses:
+        "200":
+          description: Updated booking
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+  /admin/transactions:
+    get:
+      operationId: getAdminTransactions
+      tags: [admin]
+      summary: List paid and pending transactions
+      responses:
+        "200":
+          description: Transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SalonTransaction" }
+  /payments/midtrans/notification:
+    post:
+      operationId: receiveMidtransNotification
+      tags: [payments]
+      summary: Receive and verify a Midtrans notification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MidtransNotification"
+      responses:
+        "200":
+          description: Notification accepted
+        "400":
+          description: Invalid notification signature
 components:
   schemas:
     HealthStatus:
       type: object
       properties:
-        status:
-          type: string
-      required:
-        - status
-
+        status: { type: string }
+      required: [status]
+    SalonService:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        durationMin: { type: integer }
+        price: { type: number }
+        imageUrl: { type: ["string", "null"] }
+        category: { type: string }
+        isActive: { type: boolean }
+      required: [id, name, description, durationMin, price, imageUrl, category, isActive]
+    MembershipLevel:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        minSpending: { type: number }
+        discountPercent: { type: number }
+        badgeColor: { type: string }
+        benefits: { type: array, items: { type: string } }
+        sortOrder: { type: integer }
+      required: [id, name, minSpending, discountPercent, badgeColor, benefits, sortOrder]
+    Testimonial:
+      type: object
+      properties:
+        name: { type: string }
+        quote: { type: string }
+        service: { type: string }
+      required: [name, quote, service]
+    GalleryItem:
+      type: object
+      properties:
+        src: { type: string }
+        alt: { type: string }
+      required: [src, alt]
+    SalonOverview:
+      type: object
+      properties:
+        services: { type: array, items: { $ref: "#/components/schemas/SalonService" } }
+        levels: { type: array, items: { $ref: "#/components/schemas/MembershipLevel" } }
+        testimonials: { type: array, items: { $ref: "#/components/schemas/Testimonial" } }
+        gallery: { type: array, items: { $ref: "#/components/schemas/GalleryItem" } }
+        address: { type: string }
+        phone: { type: string }
+        hours: { type: array, items: { type: string } }
+      required: [services, levels, testimonials, gallery, address, phone, hours]
+    SessionUser:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        role: { type: string, enum: [ADMIN, MEMBER] }
+        isActive: { type: boolean }
+      required: [id, name, email, phone, role, isActive]
+    RegisterInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2 }
+        email: { type: string, format: email }
+        phone: { type: string, minLength: 8 }
+        password: { type: string, minLength: 8 }
+      required: [name, email, phone, password]
+    LoginInput:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+      required: [email, password]
+    ProfileUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 2 }
+        phone: { type: string, minLength: 8 }
+      required: [name, phone]
+    PasswordChange:
+      type: object
+      properties:
+        currentPassword: { type: string, minLength: 8 }
+        newPassword: { type: string, minLength: 8 }
+      required: [currentPassword, newPassword]
+    PasswordChangeResult:
+      type: object
+      properties:
+        message: { type: string }
+      required: [message]
+    SlotsResponse:
+      type: object
+      properties:
+        slots: { type: array, items: { type: string } }
+      required: [slots]
+    Booking:
+      type: object
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        memberName: { type: string }
+        serviceId: { type: string }
+        serviceName: { type: string }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+        status: { type: string, enum: [PENDING_PAYMENT, CONFIRMED, COMPLETED, CANCELLED] }
+        paymentStatus: { type: string, enum: [PENDING, PAID, FAILED] }
+        amount: { type: number }
+        discountAmount: { type: number }
+        finalAmount: { type: number }
+        bookingCode: { type: string }
+      required: [id, userId, memberName, serviceId, serviceName, startTime, endTime, status, paymentStatus, amount, discountAmount, finalAmount, bookingCode]
+    BookingInput:
+      type: object
+      properties:
+        serviceId: { type: string }
+        startTime: { type: string, format: date-time }
+      required: [serviceId, startTime]
+    PaymentResult:
+      type: object
+      properties:
+        bookingId: { type: string }
+        status: { type: string, enum: [PAID, PENDING, FAILED] }
+        message: { type: string }
+      required: [bookingId, status, message]
+    SalonTransaction:
+      type: object
+      properties:
+        id: { type: string }
+        bookingId: { type: string }
+        memberName: { type: string }
+        serviceName: { type: string }
+        amount: { type: number }
+        discountAmount: { type: number }
+        finalAmount: { type: number }
+        status: { type: string, enum: [PENDING, PAID, FAILED] }
+        createdAt: { type: string, format: date-time }
+      required: [id, bookingId, memberName, serviceName, amount, discountAmount, finalAmount, status, createdAt]
+    MemberDashboard:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/SessionUser" }
+        level: { $ref: "#/components/schemas/MembershipLevel" }
+        nextLevel: { anyOf: [{ $ref: "#/components/schemas/MembershipLevel" }, { type: "null" }] }
+        totalSpending: { type: number }
+        points: { type: integer }
+        pointsToNextLevel: { type: number }
+        bookings: { type: array, items: { $ref: "#/components/schemas/Booking" } }
+        transactions: { type: array, items: { $ref: "#/components/schemas/SalonTransaction" } }
+        notifications: { type: array, items: { type: string } }
+      required: [user, level, nextLevel, totalSpending, points, pointsToNextLevel, bookings, transactions, notifications]
+    RevenuePoint:
+      type: object
+      properties:
+        label: { type: string }
+        amount: { type: number }
+      required: [label, amount]
+    AdminDashboard:
+      type: object
+      properties:
+        todayRevenue: { type: number }
+        monthRevenue: { type: number }
+        totalRevenue: { type: number }
+        transactionCount: { type: integer }
+        newMembers: { type: integer }
+        revenueTrend: { type: array, items: { $ref: "#/components/schemas/RevenuePoint" } }
+        topServices: { type: array, items: { type: string } }
+        upcomingBookings: { type: array, items: { $ref: "#/components/schemas/Booking" } }
+      required: [todayRevenue, monthRevenue, totalRevenue, transactionCount, newMembers, revenueTrend, topServices, upcomingBookings]
+    AdminMember:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        level: { type: string }
+        levelId: { type: string }
+        totalSpending: { type: number }
+        points: { type: integer }
+        joinedAt: { type: string, format: date-time }
+        isActive: { type: boolean }
+      required: [id, name, email, phone, level, levelId, totalSpending, points, joinedAt, isActive]
+    ServiceInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2 }
+        description: { type: string }
+        durationMin: { type: integer, minimum: 10 }
+        price: { type: number, minimum: 0 }
+        imageUrl: { type: ["string", "null"] }
+        category: { type: string }
+        isActive: { type: boolean }
+      required: [name, description, durationMin, price, imageUrl, category, isActive]
+    LevelInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2 }
+        minSpending: { type: number, minimum: 0 }
+        discountPercent: { type: number, minimum: 0, maximum: 100 }
+        badgeColor: { type: string }
+        benefits: { type: array, items: { type: string } }
+        sortOrder: { type: integer, minimum: 0 }
+      required: [name, minSpending, discountPercent, badgeColor, benefits, sortOrder]
+    MemberLevelInput:
+      type: object
+      properties:
+        levelId: { type: string }
+      required: [levelId]
+    MemberStatusInput:
+      type: object
+      properties:
+        isActive: { type: boolean }
+      required: [isActive]
+    BookingStatusInput:
+      type: object
+      properties:
+        status: { type: string, enum: [CONFIRMED, COMPLETED, CANCELLED] }
+      required: [status]
+    MidtransNotification:
+      type: object
+      properties:
+        order_id: { type: string }
+        status_code: { type: string }
+        gross_amount: { type: string }
+        signature_key: { type: string }
+        transaction_status: { type: string }
+      required: [order_id, status_code, gross_amount, signature_key, transaction_status]

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Romi Salon"
+description = "A warm, elegant Indonesian beauty salon website with service discovery, member booking and loyalty features, and an admin workspace."
+version = "1.0.0"
+id = "artifacts/romi-salon"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19752
+
+[services.development]
+run = "pnpm --filter @workspace/romi-salon run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/romi-salon", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/romi-salon/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19752"
+BASE_PATH = "/"

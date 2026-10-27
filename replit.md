@@ -1,6 +1,6 @@
-# [Project name]
+# Romi Salon
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Romi Salon helps guests discover beauty services, book visits, earn membership benefits, and gives salon staff tools to manage daily operations.
 
 ## Run & Operate
 
@@ -9,7 +9,8 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL`, `SESSION_SECRET`
+- Optional env: `MOCK_PAYMENT` (simulations are enabled unless set to `false`), `MIDTRANS_SERVER_KEY` (webhook signature verification only)
 
 ## Stack
 
@@ -22,23 +23,34 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/romi-salon` — Indonesian React/Vite app and user-facing flows
+- `artifacts/api-server/src/routes` — salon, account, booking, payment-notification, and admin APIs
+- `lib/api-spec/openapi.yaml` — source of truth for API contracts and generated client hooks
+- `lib/db/src/schema/salon.ts` — PostgreSQL schema for salon data
+- `artifacts/romi-salon/public/videos/salon.mp4` and `public/images/hero-poster.jpg` — replaceable landing-page media
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The selected web artifact is React/Vite; backend requests use the existing shared Express API.
+- The workspace is provisioned for PostgreSQL and Drizzle, so the salon schema uses that stack rather than adding a separate SQLite/Prisma database.
+- Demo payment results, points, spending, and membership updates are server-authoritative. Live Midtrans Snap checkout is not connected.
+- Sessions use HTTP-only, signed cookies with `SESSION_SECRET`.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Public service catalog, salon location and hours, membership tiers, testimonials, and booking.
+- Member registration/login, profile and password changes, bookings, payment simulation, points, level progress, and notifications.
+- Admin overview, service and membership management, member controls, booking status management, and transaction filtering/export.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- User specified Bahasa Indonesia, Rupiah, Asia/Jakarta time, and the Romi Salon plum/ivory/gold/blush/sage palette.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Push the Drizzle schema before starting the API server on a fresh database. Demo records are seeded by the API at startup.
+- `MOCK_PAYMENT=false` disables demo payments; do not set it until live checkout is configured.
+- Midtrans webhook signature checks need `MIDTRANS_SERVER_KEY`; this alone does not create Snap checkout sessions.
 
 ## Pointers
 
