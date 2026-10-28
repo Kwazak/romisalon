@@ -49,7 +49,12 @@ router.get("/bookings/slots", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Pilih layanan dan tanggal yang valid." });
     return;
   }
-  const selectedDate = parsed.data.date.toISOString().slice(0, 10);
+  const selectedDate = parsed.data.date;
+  const calendarDate = new Date(`${selectedDate}T00:00:00.000Z`);
+  if (Number.isNaN(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== selectedDate) {
+    res.status(400).json({ error: "Pilih tanggal yang valid." });
+    return;
+  }
   const [service] = await db
     .select()
     .from(salonServices)

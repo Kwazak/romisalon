@@ -8,5 +8,8 @@
 
 export type GetAvailableSlotsParams = {
 serviceId: string;
-date: Date;
+/**
+ * @pattern ^[0-9]{4}-[0-9]{2}-[0-9]{2}$
+ */
+date: string;
 };

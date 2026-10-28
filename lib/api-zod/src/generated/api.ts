@@ -126,9 +126,12 @@ export const LogoutResponse = zod.void()
 /**
  * @summary Get available booking times
  */
+export const getAvailableSlotsQueryDateRegExp = new RegExp('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+
+
 export const GetAvailableSlotsQueryParams = zod.object({
   "serviceId": zod.coerce.string(),
-  "date": zod.date()
+  "date": zod.coerce.string().regex(getAvailableSlotsQueryDateRegExp)
 })
 
 export const GetAvailableSlotsResponse = zod.object({

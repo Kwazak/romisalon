@@ -285,6 +285,9 @@ export interface MidtransNotification {
 
 export type GetAvailableSlotsParams = {
 serviceId: string;
+/**
+ * @pattern ^[0-9]{4}-[0-9]{2}-[0-9]{2}$
+ */
 date: string;
 };
 
