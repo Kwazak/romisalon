@@ -16,6 +16,7 @@ jobs:
       - name: 2. Install pnpm
         uses: pnpm/action-setup@v4
         with:
+        version: 9
           run_install: false
 
       - name: 3. Setup Node.js v24 & Cache pnpm
