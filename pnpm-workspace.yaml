@@ -74,6 +74,12 @@ onlyBuiltDependencies:
   - msw
   - unrs-resolver
 
+allowBuilds:
+  '@swc/core': true
+  esbuild: true
+  msw: true
+  unrs-resolver: true
+
 overrides:
   "proxy-addr@^2": "^2.0.8"
   "source-map-js@^1": "^1.2.2"

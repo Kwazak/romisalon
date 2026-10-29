@@ -30,7 +30,7 @@ jobs:
           cache: "pnpm"
 
       - name: 4. Install Dependencies
-        run: pnpm install --no-frozen-lockfile --config.minimum-release-age=0
+        run: pnpm install --no-frozen-lockfile --ignore-scripts --allow-build=esbuild --allow-build=@swc/core --allow-build=msw --allow-build=unrs-resolver --config.minimum-release-age=0
 
       - name: 5. Typecheck & Build Frontend + Backend
         env:
@@ -62,7 +62,17 @@ jobs:
           path: release.tar.gz
           retention-days: 7
 
-      - name: 8. Upload release.tar.gz ke VM (Jika Secret VM Dikonfigurasi)
+      - name: 8. Siapkan Direktori di VM Debian (Jika Secret VM Dikonfigurasi)
+        if: ${{ env.VM_HOST != '' && env.VM_USERNAME != '' && env.VM_SSH_KEY != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            mkdir -p /var/www/romisalon/frontend /var/www/romisalon/backend
+
+      - name: 9. Upload release.tar.gz ke VM (Jika Secret VM Dikonfigurasi)
         if: ${{ env.VM_HOST != '' && env.VM_USERNAME != '' && env.VM_SSH_KEY != '' }}
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -72,7 +82,7 @@ jobs:
           source: "release.tar.gz"
           target: "/var/www/romisalon"
 
-      - name: 9. Extract & Restart PM2 di VM Debian (Jika Secret VM Dikonfigurasi)
+      - name: 10. Extract & Restart PM2 di VM Debian (Jika Secret VM Dikonfigurasi)
         if: ${{ env.VM_HOST != '' && env.VM_USERNAME != '' && env.VM_SSH_KEY != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -80,7 +90,6 @@ jobs:
           username: ${{ secrets.VM_USERNAME }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            mkdir -p /var/www/romisalon/frontend /var/www/romisalon/backend
             cd /var/www/romisalon
 
             # Bersihkan file frontend lama & ekstrak rilis baru
@@ -88,7 +97,7 @@ jobs:
             tar -xzf release.tar.gz -C /var/www/romisalon
             rm -f release.tar.gz
 
-            # Pastikan file .env ada agar flag --env-file-if-exists / --env-file tidak gagal
+            # Pastikan file .env ada agar flag --env-file-if-exists tidak gagal
             cd /var/www/romisalon/backend
             touch .env
 
