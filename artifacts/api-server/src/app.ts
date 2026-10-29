@@ -38,6 +38,9 @@ app.use(cookieParser());
 app.use("/api", router);
 
 const candidatePublicDirs = [
+  path.resolve(import.meta.dirname, "../../frontend"),
+  path.resolve(process.cwd(), "../frontend"),
+  path.resolve(process.cwd(), "frontend"),
   path.resolve(import.meta.dirname, "../../romi-salon/dist/public"),
   path.resolve(process.cwd(), "artifacts/romi-salon/dist/public"),
   path.resolve(process.cwd(), "../romi-salon/dist/public"),
