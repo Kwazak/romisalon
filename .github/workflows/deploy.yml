@@ -8,6 +8,10 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    env:
+      VM_HOST: ${{ secrets.VM_HOST }}
+      VM_USERNAME: ${{ secrets.VM_USERNAME }}
+      VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
 
     steps:
       - name: 1. Checkout Repository
@@ -59,7 +63,7 @@ jobs:
           retention-days: 7
 
       - name: 8. Upload release.tar.gz ke VM (Jika Secret VM Dikonfigurasi)
-        if: ${{ secrets.VM_HOST != '' && secrets.VM_USERNAME != '' && secrets.VM_SSH_KEY != '' }}
+        if: ${{ env.VM_HOST != '' && env.VM_USERNAME != '' && env.VM_SSH_KEY != '' }}
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VM_HOST }}
@@ -69,7 +73,7 @@ jobs:
           target: "/var/www/romisalon"
 
       - name: 9. Extract & Restart PM2 di VM Debian (Jika Secret VM Dikonfigurasi)
-        if: ${{ secrets.VM_HOST != '' && secrets.VM_USERNAME != '' && secrets.VM_SSH_KEY != '' }}
+        if: ${{ env.VM_HOST != '' && env.VM_USERNAME != '' && env.VM_SSH_KEY != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
