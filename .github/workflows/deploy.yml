@@ -63,7 +63,6 @@ jobs:
           retention-days: 7
 
       - name: 8. Siapkan Direktori di VM Debian (Jika Secret VM Dikonfigurasi)
-        if: ${{ env.VM_HOST != '' && env.VM_USERNAME != '' && env.VM_SSH_KEY != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
@@ -73,7 +72,6 @@ jobs:
             mkdir -p /var/www/romisalon/frontend /var/www/romisalon/backend
 
       - name: 9. Upload release.tar.gz ke VM (Jika Secret VM Dikonfigurasi)
-        if: ${{ env.VM_HOST != '' && env.VM_USERNAME != '' && env.VM_SSH_KEY != '' }}
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VM_HOST }}
@@ -83,7 +81,6 @@ jobs:
           target: "/var/www/romisalon"
 
       - name: 10. Extract & Restart PM2 di VM Debian (Jika Secret VM Dikonfigurasi)
-        if: ${{ env.VM_HOST != '' && env.VM_USERNAME != '' && env.VM_SSH_KEY != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
@@ -97,13 +94,17 @@ jobs:
             tar -xzf release.tar.gz -C /var/www/romisalon
             rm -f release.tar.gz
 
-            # Pastikan file .env ada agar flag --env-file-if-exists tidak gagal
+            # Pastikan Nginx (www-data) bisa membaca seluruh folder dan file frontend
+            chmod -R 755 /var/www/romisalon/frontend
+
+            # Pastikan file .env ada dan memiliki PORT=5000 default
             cd /var/www/romisalon/backend
             touch .env
+            grep -q "^PORT=" .env || echo "PORT=5000" >> .env
 
             # Jalankan Backend dengan Node v24 + PM2
-            pm2 describe romisalon-api > /dev/null 2>&1 \
-              && pm2 reload romisalon-api --update-env \
-              || pm2 start dist/index.mjs --name "romisalon-api" --node-args="--env-file-if-exists=.env"
+            PORT=5000 pm2 describe romisalon-api > /dev/null 2>&1 \
+              && PORT=5000 pm2 reload romisalon-api --update-env \
+              || PORT=5000 pm2 start dist/index.mjs --name "romisalon-api" --node-args="--env-file-if-exists=.env"
 
             pm2 save
