@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, eq, gt, lt, ne, sql } from "drizzle-orm";
+import { and, eq, gt, lt, ne, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   CancelMemberBookingParams,
@@ -16,32 +16,14 @@ import {
   membershipLevels,
   memberProfiles,
   salonBookings,
-  salonNotifications,
   salonServices,
-  salonSettings,
   salonTransactions,
 } from "@workspace/db";
+import { jakartaClock, jakartaDate, jakartaDateKey, slotLabel } from "../lib/jakarta-time";
+import { settlePendingPayment } from "../lib/payment-settlement";
 import { getSalonIdentity, requireSalonUser } from "../middlewares/salon-auth";
 
 const router: IRouter = Router();
-const jakartaDate = (day: string, hour = 0, minute = 0): Date =>
-  new Date(`${day}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+07:00`);
-const slotLabel = (date: Date): string =>
-  new Intl.DateTimeFormat("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
-const jakartaDateKey = (date: Date): string =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(date);
-const jakartaClock = (date: Date): { hour: number; minute: number } => {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Jakarta",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  return {
-    hour: Number(parts.find((part) => part.type === "hour")?.value),
-    minute: Number(parts.find((part) => part.type === "minute")?.value),
-  };
-};
 
 router.get("/bookings/slots", async (req, res): Promise<void> => {
   const parsed = GetAvailableSlotsQueryParams.safeParse(req.query);
@@ -51,7 +33,10 @@ router.get("/bookings/slots", async (req, res): Promise<void> => {
   }
   const selectedDate = parsed.data.date;
   const calendarDate = new Date(`${selectedDate}T00:00:00.000Z`);
-  if (Number.isNaN(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== selectedDate) {
+  if (
+    Number.isNaN(calendarDate.getTime()) ||
+    calendarDate.toISOString().slice(0, 10) !== selectedDate
+  ) {
     res.status(400).json({ error: "Pilih tanggal yang valid." });
     return;
   }
@@ -69,12 +54,21 @@ router.get("/bookings/slots", async (req, res): Promise<void> => {
   const closingHour = weekday === 0 || weekday === 6 ? 18 : 20;
   const dayStart = jakartaDate(selectedDate);
   const dayEnd = jakartaDate(selectedDate, 23, 59);
-  const existing = await db
+  const existingBookings = await db
     .select()
     .from(salonBookings)
-    .where(and(lt(salonBookings.startTime, dayEnd), gt(salonBookings.endTime, dayStart), ne(salonBookings.status, "CANCELLED")));
+    .where(
+      and(
+        lt(salonBookings.startTime, dayEnd),
+        gt(salonBookings.endTime, dayStart),
+        ne(salonBookings.status, "CANCELLED"),
+      ),
+    );
   const pendingCutoff = Date.now() - 15 * 60 * 1000;
-  const active = existing.filter((booking) => booking.status !== "PENDING_PAYMENT" || booking.createdAt.getTime() > pendingCutoff);
+  const activeBookings = existingBookings.filter(
+    (booking) =>
+      booking.status !== "PENDING_PAYMENT" || booking.createdAt.getTime() > pendingCutoff,
+  );
   const slots: string[] = [];
   for (let hour = openingHour; hour < closingHour; hour += 1) {
     for (const minute of [0, 30]) {
@@ -82,7 +76,7 @@ router.get("/bookings/slots", async (req, res): Promise<void> => {
       const endTime = new Date(startTime.getTime() + service.durationMin * 60_000);
       if (endTime > jakartaDate(selectedDate, closingHour)) continue;
       if (startTime.getTime() <= Date.now()) continue;
-      const overlaps = active.some(
+      const overlaps = activeBookings.some(
         (booking) => booking.startTime < endTime && booking.endTime > startTime,
       );
       if (!overlaps) slots.push(slotLabel(startTime));
@@ -126,9 +120,17 @@ router.post("/bookings", requireSalonUser, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Pilih waktu sesuai jam operasional salon." });
     return;
   }
-  const [profile] = await db.select().from(memberProfiles).where(eq(memberProfiles.userId, user.id)).limit(1);
+  const [profile] = await db
+    .select()
+    .from(memberProfiles)
+    .where(eq(memberProfiles.userId, user.id))
+    .limit(1);
   const [level] = profile
-    ? await db.select().from(membershipLevels).where(eq(membershipLevels.id, profile.levelId)).limit(1)
+    ? await db
+        .select()
+        .from(membershipLevels)
+        .where(eq(membershipLevels.id, profile.levelId))
+        .limit(1)
     : [];
   const amount = service.price;
   const discountAmount = Math.round((amount * (level?.discountPercent ?? 0)) / 100);
@@ -138,7 +140,11 @@ router.post("/bookings", requireSalonUser, async (req, res): Promise<void> => {
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('romi-salon-slot-capacity'))`);
     const overlapping = await tx
-      .select({ id: salonBookings.id, status: salonBookings.status, createdAt: salonBookings.createdAt })
+      .select({
+        id: salonBookings.id,
+        status: salonBookings.status,
+        createdAt: salonBookings.createdAt,
+      })
       .from(salonBookings)
       .where(
         and(
@@ -149,10 +155,11 @@ router.post("/bookings", requireSalonUser, async (req, res): Promise<void> => {
       )
       .limit(1);
     const pendingCutoff = Date.now() - 15 * 60 * 1000;
-    const blocked = overlapping.some(
-      (booking) => booking.status !== "PENDING_PAYMENT" || booking.createdAt.getTime() > pendingCutoff,
+    const isBlocked = overlapping.some(
+      (booking) =>
+        booking.status !== "PENDING_PAYMENT" || booking.createdAt.getTime() > pendingCutoff,
     );
-    if (blocked) return null;
+    if (isBlocked) return null;
     await tx.insert(salonBookings).values({
       id,
       userId: user.id,
@@ -201,122 +208,138 @@ router.patch("/bookings/:bookingId/cancel", requireSalonUser, async (req, res): 
     return;
   }
   const user = getSalonIdentity(res);
-  const [row] = await db
+  const [existingBooking] = await db
     .select()
     .from(salonBookings)
     .where(and(eq(salonBookings.id, params.data.bookingId), eq(salonBookings.userId, user.id)))
     .limit(1);
-  if (!row) {
+  if (!existingBooking) {
     res.status(404).json({ error: "Pemesanan tidak ditemukan." });
     return;
   }
-  if (row.status === "COMPLETED" || row.status === "CANCELLED" || row.startTime <= new Date()) {
+  if (
+    existingBooking.status === "COMPLETED" ||
+    existingBooking.status === "CANCELLED" ||
+    existingBooking.startTime <= new Date()
+  ) {
     res.status(409).json({ error: "Pemesanan ini tidak dapat dibatalkan." });
     return;
   }
-  const [service] = await db.select().from(salonServices).where(eq(salonServices.id, row.serviceId)).limit(1);
-  const [transaction] = await db.select().from(salonTransactions).where(eq(salonTransactions.bookingId, row.id)).limit(1);
-  const [updated] = await db
+  const [service] = await db
+    .select()
+    .from(salonServices)
+    .where(eq(salonServices.id, existingBooking.serviceId))
+    .limit(1);
+  const [transaction] = await db
+    .select()
+    .from(salonTransactions)
+    .where(eq(salonTransactions.bookingId, existingBooking.id))
+    .limit(1);
+  const [updatedBooking] = await db
     .update(salonBookings)
     .set({ status: "CANCELLED" })
-    .where(eq(salonBookings.id, row.id))
+    .where(eq(salonBookings.id, existingBooking.id))
     .returning();
   res.json(
     CancelMemberBookingResponse.parse({
-      id: updated.id,
-      userId: updated.userId,
+      id: updatedBooking.id,
+      userId: updatedBooking.userId,
       memberName: user.name,
-      serviceId: updated.serviceId,
+      serviceId: updatedBooking.serviceId,
       serviceName: service?.name ?? "Layanan",
-      startTime: updated.startTime.toISOString(),
-      endTime: updated.endTime.toISOString(),
-      status: updated.status,
+      startTime: updatedBooking.startTime.toISOString(),
+      endTime: updatedBooking.endTime.toISOString(),
+      status: updatedBooking.status,
       paymentStatus: transaction?.status ?? "PENDING",
       amount: transaction?.amount ?? 0,
       discountAmount: transaction?.discountAmount ?? 0,
       finalAmount: transaction?.finalAmount ?? 0,
-      bookingCode: updated.bookingCode,
+      bookingCode: updatedBooking.bookingCode,
     }),
   );
 });
 
-router.post("/bookings/:bookingId/mock-payment", requireSalonUser, async (req, res): Promise<void> => {
-  const params = CompleteMockPaymentParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: "Pemesanan tidak valid." });
-    return;
-  }
-  if (process.env.MOCK_PAYMENT === "false") {
-    res.status(503).json({ error: "Pembayaran simulasi dinonaktifkan. Hubungkan Midtrans untuk menerima pembayaran." });
-    return;
-  }
-  const user = getSalonIdentity(res);
-  const payment = await db.transaction(async (tx) => {
-    const [booking] = await tx
-      .select()
-      .from(salonBookings)
-      .where(and(eq(salonBookings.id, params.data.bookingId), eq(salonBookings.userId, user.id)))
-      .limit(1);
-    if (!booking) return { error: "Pemesanan tidak ditemukan.", status: 404 as const };
-    const [transaction] = await tx.select().from(salonTransactions).where(eq(salonTransactions.bookingId, booking.id)).limit(1);
-    if (!transaction) return { error: "Transaksi tidak ditemukan.", status: 404 as const };
-    if (transaction.status === "PAID") {
-      return { value: { bookingId: booking.id, status: "PAID", message: "Pembayaran sudah tercatat." } };
+router.post(
+  "/bookings/:bookingId/mock-payment",
+  requireSalonUser,
+  async (req, res): Promise<void> => {
+    const params = CompleteMockPaymentParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Pemesanan tidak valid." });
+      return;
     }
-    if (booking.status === "CANCELLED" || transaction.status !== "PENDING") {
-      return { error: "Pemesanan tidak dapat dibayar.", status: 409 as const };
+    if (process.env.MOCK_PAYMENT === "false") {
+      res.status(503).json({
+        error: "Pembayaran simulasi dinonaktifkan. Hubungkan Midtrans untuk menerima pembayaran.",
+      });
+      return;
     }
-    const [profile] = await tx.select().from(memberProfiles).where(eq(memberProfiles.userId, user.id)).limit(1);
-    if (!profile) return { error: "Profil member tidak ditemukan.", status: 409 as const };
-    const [pointsSetting] = await tx.select().from(salonSettings).where(eq(salonSettings.key, "points_per_rupiah")).limit(1);
-    const pointsRatio = Number(pointsSetting?.value ?? "0.001");
-    const totalSpending = profile.totalSpending + transaction.finalAmount;
-    const points = profile.points + Math.floor(transaction.finalAmount * pointsRatio);
-    const [currentLevel] = await tx.select().from(membershipLevels).where(eq(membershipLevels.id, profile.levelId)).limit(1);
-    const sortedLevels = await tx.select().from(membershipLevels).orderBy(asc(membershipLevels.sortOrder));
-    const earnedLevel = [...sortedLevels].reverse().find((level) => totalSpending >= level.minSpending);
-    const nextLevelId = profile.manualLevel ? profile.levelId : earnedLevel?.id ?? profile.levelId;
-    const [nextLevel] = await tx.select().from(membershipLevels).where(eq(membershipLevels.id, nextLevelId)).limit(1);
-    const paidAt = new Date();
-    const [claimedPayment] = await tx
-      .update(salonTransactions)
-      .set({ status: "PAID", paymentRef: `MOCK-${transaction.id}`, paidAt })
-      .where(and(eq(salonTransactions.id, transaction.id), eq(salonTransactions.status, "PENDING")))
-      .returning({ id: salonTransactions.id });
-    if (!claimedPayment) {
+    const user = getSalonIdentity(res);
+    const paymentResult = await db.transaction(async (tx) => {
+      const [booking] = await tx
+        .select()
+        .from(salonBookings)
+        .where(and(eq(salonBookings.id, params.data.bookingId), eq(salonBookings.userId, user.id)))
+        .limit(1);
+      if (!booking) return { error: "Pemesanan tidak ditemukan.", status: 404 as const };
+
+      const [transaction] = await tx
+        .select()
+        .from(salonTransactions)
+        .where(eq(salonTransactions.bookingId, booking.id))
+        .limit(1);
+      if (!transaction) return { error: "Transaksi tidak ditemukan.", status: 404 as const };
+
+      if (transaction.status === "PAID") {
+        return {
+          value: {
+            bookingId: booking.id,
+            status: "PAID",
+            message: "Pembayaran sudah tercatat.",
+          },
+        };
+      }
+      if (booking.status === "CANCELLED" || transaction.status !== "PENDING") {
+        return { error: "Pemesanan tidak dapat dibayar.", status: 409 as const };
+      }
+
+      const settlement = await settlePendingPayment({
+        tx,
+        bookingId: booking.id,
+        transactionId: transaction.id,
+        userId: user.id,
+        finalAmount: transaction.finalAmount,
+        paymentRef: `MOCK-${transaction.id}`,
+      });
+
+      if (settlement.status === "PROFILE_MISSING") {
+        return { error: "Profil member tidak ditemukan.", status: 409 as const };
+      }
+      if (settlement.status === "ALREADY_FINAL") {
+        return {
+          value: {
+            bookingId: booking.id,
+            status: "PAID",
+            message: "Pembayaran sudah tercatat.",
+          },
+        };
+      }
+
       return {
         value: {
           bookingId: booking.id,
           status: "PAID",
-          message: "Pembayaran sudah tercatat.",
+          message: "Pembayaran simulasi berhasil. Poin dan level sudah diperbarui.",
         },
       };
+    });
+
+    if ("error" in paymentResult) {
+      res.status(paymentResult.status ?? 500).json({ error: paymentResult.error });
+      return;
     }
-    await tx.update(salonBookings).set({ status: "CONFIRMED" }).where(eq(salonBookings.id, booking.id));
-    await tx
-      .update(memberProfiles)
-      .set({ totalSpending, points, levelId: nextLevelId })
-      .where(eq(memberProfiles.userId, user.id));
-    if (nextLevel && currentLevel && nextLevel.sortOrder > currentLevel.sortOrder) {
-      await tx.insert(salonNotifications).values({
-        id: randomUUID(),
-        userId: user.id,
-        message: `Selamat! Kamu naik ke level ${nextLevel.name}. Nikmati benefit membership barumu.`,
-      });
-    }
-    return {
-      value: {
-        bookingId: booking.id,
-        status: "PAID",
-        message: "Pembayaran simulasi berhasil. Poin dan level sudah diperbarui.",
-      },
-    };
-  });
-  if ("error" in payment) {
-    res.status(payment.status ?? 500).json({ error: payment.error });
-    return;
-  }
-  res.json(CompleteMockPaymentResponse.parse(payment.value));
-});
+    res.json(CompleteMockPaymentResponse.parse(paymentResult.value));
+  },
+);
 
 export default router;

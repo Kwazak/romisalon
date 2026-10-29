@@ -5,7 +5,9 @@ import { db, salonUsers } from "@workspace/db";
 
 const sessionCookie = "romi_session";
 const maxAgeSeconds = 60 * 60 * 24 * 7;
-const sessionSecret = process.env.SESSION_SECRET ?? "";
+const sessionSecret =
+  process.env.SESSION_SECRET ||
+  (process.env.NODE_ENV === "production" ? "" : "romi-salon-local-dev-secret-2026");
 
 if (!sessionSecret) {
   throw new Error("SESSION_SECRET must be configured before the salon API starts.");

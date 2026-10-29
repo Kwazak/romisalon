@@ -29,7 +29,7 @@ router.get("/salon/overview", async (_req, res): Promise<void> => {
     phone: settings.get("salon_phone") ?? "+62 812-3456-7890",
     hours: settings.has("opening_hours")
       ? JSON.parse(settings.get("opening_hours") ?? "[]") as string[]
-      : ["Senin–Jumat 09.00–20.00", "Sabtu–Minggu 10.00–18.00"],
+      : ["Senin – Jumat · 09.00 – 20.00", "Sabtu – Minggu · 10.00 – 18.00"],
   };
   res.json(GetSalonOverviewResponse.parse(overview));
 });

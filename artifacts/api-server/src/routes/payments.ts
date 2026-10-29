@@ -1,16 +1,9 @@
 import { Router, type IRouter } from "express";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { asc, eq, and } from "drizzle-orm";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { and, eq } from "drizzle-orm";
 import { ReceiveMidtransNotificationBody } from "@workspace/api-zod";
-import {
-  db,
-  membershipLevels,
-  memberProfiles,
-  salonBookings,
-  salonNotifications,
-  salonSettings,
-  salonTransactions,
-} from "@workspace/db";
+import { db, salonBookings, salonTransactions } from "@workspace/db";
+import { settlePendingPayment } from "../lib/payment-settlement";
 
 const router: IRouter = Router();
 
@@ -54,55 +47,62 @@ router.post("/payments/midtrans/notification", async (req, res): Promise<void> =
   }
 
   const result = await db.transaction(async (tx) => {
-    const [booking] = await tx.select().from(salonBookings).where(eq(salonBookings.bookingCode, notice.order_id)).limit(1);
+    const [booking] = await tx
+      .select()
+      .from(salonBookings)
+      .where(eq(salonBookings.bookingCode, notice.order_id))
+      .limit(1);
     if (!booking) return "NOT_FOUND";
-    const [transaction] = await tx.select().from(salonTransactions).where(eq(salonTransactions.bookingId, booking.id)).limit(1);
+    const [transaction] = await tx
+      .select()
+      .from(salonTransactions)
+      .where(eq(salonTransactions.bookingId, booking.id))
+      .limit(1);
     if (!transaction) return "NOT_FOUND";
-    if (Math.round(Number(notice.gross_amount)) !== transaction.finalAmount) return "AMOUNT_MISMATCH";
+    if (Math.round(Number(notice.gross_amount)) !== transaction.finalAmount) {
+      return "AMOUNT_MISMATCH";
+    }
     if (transaction.status === "PAID") return "ALREADY_PAID";
     if (transaction.status !== "PENDING") return "ALREADY_FINAL";
     if (outcome === "PENDING") return "PENDING";
-    const [profile] =
-      outcome === "PAID"
-        ? await tx.select().from(memberProfiles).where(eq(memberProfiles.userId, transaction.userId)).limit(1)
-        : [];
-    if (outcome === "PAID" && !profile) return "PROFILE_MISSING";
-
-    const [claimed] = await tx
-      .update(salonTransactions)
-      .set({
-        status: outcome,
-        paymentRef: notice.order_id,
-        paidAt: outcome === "PAID" ? new Date() : null,
-      })
-      .where(and(eq(salonTransactions.id, transaction.id), eq(salonTransactions.status, "PENDING")))
-      .returning({ id: salonTransactions.id });
-    if (!claimed) return "ALREADY_FINAL";
 
     if (outcome === "FAILED") {
-      await tx.update(salonBookings).set({ status: "CANCELLED" }).where(eq(salonBookings.id, booking.id));
+      const [claimedFailure] = await tx
+        .update(salonTransactions)
+        .set({
+          status: "FAILED",
+          paymentRef: notice.order_id,
+          paidAt: null,
+        })
+        .where(
+          and(
+            eq(salonTransactions.id, transaction.id),
+            eq(salonTransactions.status, "PENDING"),
+          ),
+        )
+        .returning({ id: salonTransactions.id });
+      if (!claimedFailure) return "ALREADY_FINAL";
+
+      await tx
+        .update(salonBookings)
+        .set({ status: "CANCELLED" })
+        .where(eq(salonBookings.id, booking.id));
       return "FAILED";
     }
 
-    await tx.update(salonBookings).set({ status: "CONFIRMED" }).where(eq(salonBookings.id, booking.id));
-    const [ratioSetting] = await tx.select().from(salonSettings).where(eq(salonSettings.key, "points_per_rupiah")).limit(1);
-    const ratio = Number(ratioSetting?.value ?? "0.001");
-    const paidProfile = profile!;
-    const totalSpending = paidProfile.totalSpending + transaction.finalAmount;
-    const points = paidProfile.points + Math.floor(transaction.finalAmount * ratio);
-    const [currentLevel] = await tx.select().from(membershipLevels).where(eq(membershipLevels.id, paidProfile.levelId)).limit(1);
-    const levels = await tx.select().from(membershipLevels).orderBy(asc(membershipLevels.sortOrder));
-    const earned = [...levels].reverse().find((level) => totalSpending >= level.minSpending);
-    const levelId = paidProfile.manualLevel ? paidProfile.levelId : earned?.id ?? paidProfile.levelId;
-    const [nextLevel] = await tx.select().from(membershipLevels).where(eq(membershipLevels.id, levelId)).limit(1);
-    await tx.update(memberProfiles).set({ totalSpending, points, levelId }).where(eq(memberProfiles.userId, transaction.userId));
-    if (currentLevel && nextLevel && nextLevel.sortOrder > currentLevel.sortOrder) {
-      await tx.insert(salonNotifications).values({
-        id: randomUUID(),
-        userId: transaction.userId,
-        message: `Selamat! Kamu naik ke level ${nextLevel.name}. Benefit membership barumu sudah aktif.`,
-      });
-    }
+    const settlement = await settlePendingPayment({
+      tx,
+      bookingId: booking.id,
+      transactionId: transaction.id,
+      userId: transaction.userId,
+      finalAmount: transaction.finalAmount,
+      paymentRef: notice.order_id,
+      levelUpNotificationTemplate: (nextLevelName) =>
+        `Selamat! Kamu naik ke level ${nextLevelName}. Benefit membership barumu sudah aktif.`,
+    });
+
+    if (settlement.status === "PROFILE_MISSING") return "PROFILE_MISSING";
+    if (settlement.status === "ALREADY_FINAL") return "ALREADY_FINAL";
     return "PAID";
   });
 

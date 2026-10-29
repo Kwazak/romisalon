@@ -1,0 +1,79 @@
+name: Build and Deploy RomiSalon
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: 3. Setup Node.js v24 & Cache pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: 4. Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 5. Build Frontend & Backend
+        run: |
+          # Menjalankan script build dari root (atau build masing-masing artifact)
+          pnpm --filter @workspace/romi-salon... build
+          pnpm --filter @workspace/api-server... build
+
+      - name: 6. Package Artifacts (Frontend dist/public & Backend dist/index.mjs)
+        run: |
+          mkdir -p deploy_bundle/frontend deploy_bundle/backend
+          
+          # PERHATIKAN: Mengambil isi dari dist/public/ milik romi-salon
+          cp -r artifacts/romi-salon/dist/public/* deploy_bundle/frontend/
+          
+          # Mengambil hasil bundle index.mjs dan package.json milik api-server
+          cp -r artifacts/api-server/dist deploy_bundle/backend/
+          cp artifacts/api-server/package.json deploy_bundle/backend/
+
+          # Bungkus menjadi 1 file tar.gz
+          tar -czf release.tar.gz -C deploy_bundle .
+
+      - name: 7. Upload release.tar.gz ke Azure VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: "release.tar.gz"
+          target: "/var/www/romisalon"
+
+      - name: 8. Extract & Restart PM2 di VM Debian
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            cd /var/www/romisalon
+            
+            # Bersihkan file frontend lama (kecuali folder/file tersembunyi) & ekstrak rilis baru
+            rm -rf /var/www/romisalon/frontend/*
+            tar -xzf release.tar.gz -C /var/www/romisalon
+            rm -f release.tar.gz
+
+            # Jalankan Backend dengan Node v24 + PM2
+            cd /var/www/romisalon/backend
+            pm2 describe romisalon-api > /dev/null 2>&1 \
+              && pm2 reload romisalon-api --update-env \
+              || pm2 start dist/index.mjs --name "romisalon-api" --node-args="--env-file=.env"
+            
+            pm2 save

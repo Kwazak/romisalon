@@ -1,0 +1,77 @@
+Kamu adalah senior full-stack developer sekaligus UI/UX designer. Buatkan website lengkap untuk "Romi Salon", sebuah salon kecantikan, dengan dua sisi: Member (pelanggan) dan Admin. Tuliskan kode yang lengkap dan siap dijalankan, bukan hanya potongan atau pseudocode.
+
+## 1. TECH STACK
+- Framework: Next.js 14+ (App Router) + TypeScript
+- Styling: Tailwind CSS + komponen shadcn/ui
+- Database: SQLite via Prisma ORM (mudah dijalankan lokal, skema siap dipindah ke PostgreSQL)
+- Auth: NextAuth (credentials, password di-hash dengan bcrypt), role: ADMIN dan MEMBER
+- Payment: integrasi Midtrans Snap (mode sandbox) dengan webhook notifikasi. Sediakan juga mode "mock payment" lewat environment variable agar bisa dites tanpa API key.
+- Validasi: Zod. Form: React Hook Form.
+- Chart dashboard: Recharts
+
+## 2. IDENTITAS VISUAL
+Kesan: elegan, hangat, mewah tapi ramah.
+- Palet warna:
+  - Primary: Deep Plum #3B1F2B
+  - Accent: Champagne Gold #C9A66B
+  - Background: Warm Ivory #FAF6F0
+  - Secondary: Blush Rose #E8C4C4
+  - Teks: Charcoal #2A2A2A
+  - Status: hijau sage #7A9E7E (sukses), merah bata #B5524A (error)
+- Font: "Playfair Display" untuk heading dan logo, "Inter" untuk body dan UI (via next/font)
+- Gaya: sudut membulat lembut (rounded-2xl), bayangan halus, banyak whitespace, transisi dan animasi halus (Framer Motion). Tampilan wajib responsif, mobile-first.
+
+## 3. LANDING PAGE (publik)
+- Hero fullscreen dengan VIDEO BACKGROUND yang menampilkan suasana salon (autoplay, muted, loop, playsinline). Gunakan file /public/videos/salon.mp4 dengan poster fallback /public/images/hero-poster.jpg. Beri overlay gradien plum transparan supaya teks terbaca. Tambahkan prefers-reduced-motion fallback ke gambar statis. Berikan catatan di README cara mengganti video.
+- Isi hero: logo Romi Salon, tagline, tombol "Pesan Sekarang" dan "Lihat Layanan".
+- Section: Layanan (ambil dari database), Keuntungan Membership (tampilkan tiap level dan benefitnya), Galeri, Testimoni, Lokasi dan Jam Buka, Footer.
+- Navbar transparan yang berubah solid saat scroll. Tombol Login/Daftar, atau menu profil jika sudah login.
+
+## 4. SISI MEMBER
+a. Registrasi dan login. Member baru otomatis berada di level terendah.
+b. Katalog layanan: kartu layanan dengan nama, deskripsi, durasi, harga, dan tombol "Pesan".
+   Seed data awal 3 layanan: Layanan A, Layanan B, Layanan C (nama, harga, dan durasi contoh yang realistis, misalnya Haircut, Creambath, Facial; mudah diubah admin).
+c. Alur pemesanan dan pembayaran langsung di web:
+   pilih layanan → pilih tanggal dan jam (cegah bentrok slot) → ringkasan harga (termasuk diskon level member) → bayar via Midtrans Snap (pop-up) → halaman status berhasil/pending/gagal.
+   Pesanan berstatus PAID hanya setelah webhook Midtrans terverifikasi (cek signature), bukan dari klien.
+d. Dashboard member:
+   - Kartu member bergaya kartu kredit yang menampilkan nama, level saat ini (badge warna sesuai level), dan total poin
+   - Progress bar menuju level berikutnya ("Rp X lagi untuk naik ke level Gold")
+   - Daftar benefit level saat ini
+   - Riwayat transaksi dan booking (status, tanggal, nominal, tombol unduh invoice sederhana)
+   - Edit profil dan ganti password
+e. Sistem poin dan level:
+   - Poin = akumulasi spending dari transaksi berstatus PAID (rasio poin per rupiah bisa diatur admin, default 1 poin per Rp1.000)
+   - Level ditentukan oleh total spending kumulatif dibanding batas minimum tiap level
+   - Level dihitung otomatis setiap ada pembayaran sukses, dan member mendapat notifikasi in-app saat naik level
+   - Diskon otomatis sesuai persentase benefit level saat checkout
+
+## 5. SISI ADMIN (/admin, hanya role ADMIN, dilindungi middleware)
+a. Dashboard: kartu ringkasan (pemasukan hari ini, bulan ini, total, jumlah transaksi, member baru), grafik pemasukan harian/mingguan/bulanan dengan filter rentang tanggal, layanan terlaris, dan daftar booking mendatang.
+b. Kelola Pemasukan: tabel transaksi (filter tanggal, status, layanan, member; pencarian; pagination), ekspor CSV.
+c. Kelola Layanan: tambah, edit, hapus (soft delete bila sudah pernah dipesan), aktif/nonaktif, upload gambar, atur nama, deskripsi, durasi, dan harga.
+d. Kelola Membership:
+   - CRUD jenis/level keanggotaan (contoh seed: Bronze, Silver, Gold, Platinum) dengan field: nama, warna badge, batas minimum spending, persentase diskon, deskripsi benefit
+   - Ubah batas minimum spending tiap level kapan saja. Validasi bahwa urutan batas tidak tumpang tindih. Saat ada perubahan, tampilkan konfirmasi dan jalankan kalkulasi ulang level seluruh member.
+   - Atur rasio poin per rupiah
+e. Kelola Member: daftar member (level, total spending, poin, tanggal bergabung), detail dan riwayat per member, ubah level manual (override), nonaktifkan akun.
+f. Kelola Booking: lihat jadwal (tampilan tabel dan kalender), ubah status (CONFIRMED, COMPLETED, CANCELLED), atur jam operasional dan kapasitas slot.
+
+## 6. SKEMA DATABASE (Prisma), minimal:
+User(id, name, email, phone, passwordHash, role, isActive, createdAt)
+MembershipLevel(id, name, minSpending, discountPercent, badgeColor, benefits, sortOrder)
+MemberProfile(userId, totalSpending, points, levelId)
+Service(id, name, description, duration, price, imageUrl, isActive, deletedAt)
+Booking(id, userId, serviceId, startTime, endTime, status)
+Transaction(id, bookingId, userId, amount, discountAmount, finalAmount, status, paymentRef, paidAt)
+Setting(key, value) → untuk rasio poin dan jam operasional
+Notification(id, userId, message, readAt)
+Sertakan relasi dan index yang tepat serta seed script (admin default, 4 level member, 3 layanan, beberapa data transaksi dummy untuk demo grafik).
+
+## 7. KEAMANAN DAN KUALITAS
+- Otorisasi di sisi server pada semua route dan API admin
+- Verifikasi signature webhook, idempotent (webhook yang dikirim ulang tidak menggandakan poin)
+- Gunakan database transaction saat update status pembayaran, spending, poin, dan level
+- Rate limiting pada login, sanitasi input, proteksi CSRF bawaan NextAuth
+- Semua teks UI dalam Bahasa Indonesia, format mata uang Rupiah (Intl.NumberFormat id-ID), zona waktu Asia/Jakarta
+- Loading state, empty state, dan error state yang rapi, serta aksesibilitas dasar (alt text, kontras, fokus keyboard)
