@@ -143,12 +143,15 @@ function createSqlitePgClient(filename = ":memory:") {
         return { rows: [] };
       }
 
-      const objectRows = stmt.all(...boundParams) as Array<Record<string, unknown>>;
       if (isArrayMode) {
+        (stmt as unknown as { setReturnArrays(enabled: boolean): void }).setReturnArrays(true);
+        const arrayRows = stmt.all(...boundParams) as unknown as unknown[][];
         return {
-          rows: objectRows.map((row) => Object.values(row)),
+          rows: arrayRows,
         };
       }
+
+      const objectRows = stmt.all(...boundParams) as Array<Record<string, unknown>>;
       return {
         rows: objectRows,
       };
